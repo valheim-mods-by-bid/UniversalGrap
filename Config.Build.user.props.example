@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <VALHEIM_INSTALL>C:\Path\To\Valheim</VALHEIM_INSTALL>
+    <!-- Optional when BepInEx is not installed below the Valheim directory. -->
+    <!-- <BEPINEX_PATH>C:\Path\To\BepInEx\core</BEPINEX_PATH> -->
+  </PropertyGroup>
+</Project>
+

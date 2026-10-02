@@ -1,0 +1,27 @@
+# Visual Studio and user-specific files
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Build outputs
+**/bin/
+**/obj/
+artifacts/
+
+# Generated package contents
+Package/plugins/
+Package/*.zip
+
+# Local game libraries and configuration
+lib/
+Libs/
+.env
+Config.Build.user.props
+
+# Operating-system files
+.DS_Store
+Thumbs.db
+Desktop.ini
+

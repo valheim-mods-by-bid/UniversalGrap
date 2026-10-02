@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="Config.Build.user.props" Condition="Exists('Config.Build.user.props')" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{DEAF4438-8089-40ED-8175-398E1261D45B}</ProjectGuid>
+    <OutputType>Library</OutputType>
+    <RootNamespace>UniversalGrasp</RootNamespace>
+    <AssemblyName>UniversalGrasp</AssemblyName>
+    <TargetFrameworkVersion>v4.6.2</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+    <Deterministic>true</Deterministic>
+    <ValheimManagedPath Condition="'$(VALHEIM_INSTALL)' != ''">$(VALHEIM_INSTALL)\valheim_Data\Managed</ValheimManagedPath>
+    <BepInExPath Condition="'$(BEPINEX_PATH)' == '' and '$(VALHEIM_INSTALL)' != ''">$(VALHEIM_INSTALL)\BepInEx\core</BepInExPath>
+    <BepInExPath Condition="'$(BEPINEX_PATH)' != ''">$(BEPINEX_PATH)</BepInExPath>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(OS)' == 'Windows_NT'">
+    <StartAction>Program</StartAction>
+    <StartProgram>$(VALHEIM_INSTALL)\valheim.exe</StartProgram>
+    <StartArguments>-console</StartArguments>
+    <StartWorkingDirectory>$(VALHEIM_INSTALL)</StartWorkingDirectory>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="0Harmony">
+      <HintPath>$(BepInExPath)\0Harmony.dll</HintPath>
+    </Reference>
+    <Reference Include="assembly_valheim_publicized">
+      <HintPath>$(ValheimManagedPath)\publicized_assemblies\assembly_valheim_publicized.dll</HintPath>
+    </Reference>
+    <Reference Include="assembly_utils">
+      <HintPath>$(ValheimManagedPath)\assembly_utils.dll</HintPath>
+    </Reference>
+    <Reference Include="BepInEx">
+      <HintPath>$(BepInExPath)\BepInEx.dll</HintPath>
+    </Reference>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="UnityEngine">
+      <HintPath>$(ValheimManagedPath)\UnityEngine.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(ValheimManagedPath)\UnityEngine.CoreModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.InputLegacyModule">
+      <HintPath>$(ValheimManagedPath)\UnityEngine.InputLegacyModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.ParticleSystemModule">
+      <HintPath>$(ValheimManagedPath)\UnityEngine.ParticleSystemModule.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Patches\InventoryGuiPatches.cs" />
+    <Compile Include="Properties\PluginAssemblyInfo.cs" />
+    <Compile Include="UniversalGrasp.cs" />
+    <Compile Include="VisualCloneCleaner.cs" />
+    <Compile Include="Patches\VisualEquipment_Patches.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Package\manifest.json" />
+    <None Include="Package\README.md" />
+    <None Include="THIRD_PARTY_NOTICES.md" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="Package\icon.png" />
+  </ItemGroup>
+  <Target Name="ValidateLocalReferences" BeforeTargets="ResolveReferences">
+    <Error Condition="'$(ValheimManagedPath)' == ''" Text="Set VALHEIM_INSTALL to the Valheim installation directory before building." />
+    <Error Condition="!Exists('$(ValheimManagedPath)\publicized_assemblies\assembly_valheim_publicized.dll')" Text="The publicized Valheim assembly was not found below VALHEIM_INSTALL." />
+    <Error Condition="!Exists('$(BepInExPath)\BepInEx.dll')" Text="Set BEPINEX_PATH to the directory containing the BepInEx development assemblies." />
+    <Error Condition="!Exists('$(BepInExPath)\0Harmony.dll')" Text="0Harmony.dll was not found in BEPINEX_PATH." />
+  </Target>
+  <Target Name="PackageRelease" AfterTargets="Build" Condition="'$(Configuration)' == 'Release' and '$(SkipPackaging)' != 'true'">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\scripts\Package.ps1&quot; -ProjectDirectory &quot;$(MSBuildProjectDirectory)&quot; -BinaryPath &quot;$(TargetPath)&quot; -ArtifactsDirectory &quot;$(MSBuildProjectDirectory)\artifacts&quot;" />
+  </Target>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>
