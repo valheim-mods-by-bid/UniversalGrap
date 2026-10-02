@@ -43,9 +43,9 @@ namespace UniversalGrasp.Patches
                 return code;
             }
 
-            // The original stack already contains the selected source. Add the item prefab,
-            // joint and back-attach flag and replace Object.Instantiate(source) with our
-            // visual instantiation helper.
+            // The original stack already contains the selected source.
+            // Add the item prefab, joint and back-attach flag and replace Object.Instantiate(source)
+            // with the new visual instantiation helper.
             var loadItemPrefab = new CodeInstruction(OpCodes.Ldloc_0);
             MoveLabelsAndBlocks(code[instantiateIndex], loadItemPrefab);
             code[instantiateIndex].opcode = OpCodes.Call;
@@ -54,8 +54,7 @@ namespace UniversalGrasp.Patches
             code.Insert(instantiateIndex + 1, new CodeInstruction(OpCodes.Ldarg_3));
             code.Insert(instantiateIndex + 2, new CodeInstruction(OpCodes.Ldarg_S, (byte)5));
 
-            // Give UniversalGrasp a chance to replace an unsuitable vanilla attach
-            // source before the original method performs its null check.
+            // Replace an unsuitable vanilla attach source before the original method performs its null check.
             var chooseStart = new CodeInstruction(OpCodes.Ldloc_0);
             MoveLabelsAndBlocks(code[selectionIndex], chooseStart);
             code.InsertRange(selectionIndex, new[]

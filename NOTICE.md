@@ -2,7 +2,7 @@
 
 UniversalGrasp
 
-Copyright © 2021-2026 bidfollow
+Copyright © 2021-2026 bid
 
 This program is free software licensed under the GNU General Public License, version 3 or (at your option) any later version. See `LICENSE` for the complete license text.
 

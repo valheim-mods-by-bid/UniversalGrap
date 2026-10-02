@@ -78,9 +78,6 @@ namespace UniversalGrasp
 
             if (!multipleCandidates && candidate != null) return candidate;
 
-            // Multi-part and dynamically initialized item prefabs do not always
-            // expose a renderer or a dedicated "attach" child at selection time.
-            // Let the visual clone cleaner process the complete prefab hierarchy.
             Log?.LogDebug($"Using prefab root as attach source: prefab={item.name}.");
             return item;
         }

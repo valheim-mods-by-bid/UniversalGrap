@@ -15,8 +15,6 @@ The modifier is a local client setting and can be changed in the BepInEx configu
 - Valheim
 - BepInExPack for Valheim
 
-Jotunn/JVL and EquipmentAndQuickSlots are not required.
-
 ## Installation
 
 ### Mod manager
@@ -40,4 +38,4 @@ Valheim, BepInEx, Unity assemblies, and publicized game assemblies are local bui
 
 ## License
 
-Copyright © 2021-2026 bidfollow. Licensed under GPL-3.0-or-later. See `LICENSE`.
+Copyright © 2021-2026 bid. Licensed under GPL-3.0-or-later. See `LICENSE`.

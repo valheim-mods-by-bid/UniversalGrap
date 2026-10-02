@@ -8,7 +8,7 @@ Hold any inventory item visually in either hand.
 
 The modifier defaults to Left Alt and is configurable locally.
 
-Only clicks in the player inventory are intercepted. Requires BepInEx. Jotunn/JVL and EquipmentAndQuickSlots are not required.
+Only clicks in the player inventory are intercepted. Requires BepInEx.
 
 ## Mod managers
 

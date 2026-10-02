@@ -117,9 +117,6 @@ namespace UniversalGrasp
             return component is Transform
                 || component is MeshFilter
                 || component is Renderer
-                // Keep components that contribute directly to the visible effect.
-                // Removing these made emissive/glowing and particle-based visuals
-                // disappear even though the mesh renderer itself remained valid.
                 || component is Light
                 || component is ParticleSystem
                 || component is TrailRenderer
