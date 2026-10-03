@@ -1,8 +1,6 @@
 using BepInEx;
 using BepInEx.Configuration;
 using HarmonyLib;
-using System.Linq;
-using UniversalGrasp.Patches;
 using UnityEngine;
 
 namespace UniversalGrasp
@@ -12,7 +10,7 @@ namespace UniversalGrasp
     {
         public const string PluginGuid = "org.bepinex.plugins.bid.universalgrasp";
         public const string PluginName = "UniversalGrasp";
-        public const string PluginVersion = "0.3.0";
+        public const string PluginVersion = "0.3.1";
         internal static BepInEx.Logging.ManualLogSource Log { get; private set; }
 
         internal static ConfigEntry<bool> Enabled { get; private set; }
@@ -37,49 +35,6 @@ namespace UniversalGrasp
 
             harmony.PatchAll();
             Logger.LogInfo($"{PluginName} {PluginVersion} loaded.");
-        }
-
-        internal static GameObject GetAttachObject(GameObject item)
-        {
-            GameObject attach = item.transform.Find("attach")?.gameObject;
-            if (attach != null && attach.GetComponentsInChildren<Renderer>(true).Any())
-            {
-                return attach;
-            }
-
-            GameObject candidate = null;
-            bool multipleCandidates = false;
-            foreach (Transform child in item.transform)
-            {
-                if (child.gameObject.layer != item.layer) continue;
-                if (candidate != null)
-                {
-                    multipleCandidates = true;
-                    break;
-                }
-
-                candidate = child.gameObject;
-            }
-
-            if (!multipleCandidates && candidate != null) return candidate;
-
-            candidate = null;
-            multipleCandidates = false;
-            foreach (Transform child in item.transform)
-            {
-                if (candidate != null)
-                {
-                    multipleCandidates = true;
-                    break;
-                }
-
-                candidate = child.gameObject;
-            }
-
-            if (!multipleCandidates && candidate != null) return candidate;
-
-            Log?.LogDebug($"Using prefab root as attach source: prefab={item.name}.");
-            return item;
         }
 
         private void OnDestroy()

@@ -1,7 +1,7 @@
 {
   "name": "UniversalGrasp",
   "description": "Take all items visually into your hands. Hold the configured modifier (default: **Left Alt**) and left/right-click an item from the inventory to put it into the left/right hand.",
-  "version_number": "0.3.0",
+  "version_number": "0.3.1",
   "website_url": "https://github.com/valheim-mods-by-bid/UniversalGrap",
   "dependencies": [
     "denikson-BepInExPack_Valheim-5.4.2202"

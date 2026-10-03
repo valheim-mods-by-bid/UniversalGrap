@@ -8,65 +8,154 @@ using Object = UnityEngine.Object;
 namespace UniversalGrasp
 {
     /// <summary>
-    /// Creates inactive visual-only clones and removes components in dependency order.
-    /// Dependency sorting is adapted from Jotunn's RenderManager (MIT license).
+    /// Creates an inactive visual-only source and removes components in dependency
+    /// order. Dependency sorting is adapted from Jotunn's RenderManager (MIT license).
     /// </summary>
     internal static class VisualCloneCleaner
     {
         private static readonly Dictionary<Type, List<Type>> ComponentDependencies =
             new Dictionary<Type, List<Type>>();
 
-        internal static bool TryCreate(GameObject source, out GameObject clone, out string error)
+        [ThreadStatic]
+        private static PreparedSourceScope currentScope;
+
+        internal static PreparedSourceScope BeginScope()
         {
-            clone = null;
+            var scope = new PreparedSourceScope(currentScope);
+            currentScope = scope;
+            return scope;
+        }
+
+        internal static void ReleaseScope(PreparedSourceScope scope)
+        {
+            if (scope == null)
+            {
+                return;
+            }
+
+            scope.Release();
+            if (!ReferenceEquals(currentScope, scope))
+            {
+                return;
+            }
+
+            currentScope = scope.Parent;
+            while (currentScope != null && currentScope.IsReleased)
+            {
+                currentScope = currentScope.Parent;
+            }
+        }
+
+        internal static bool TryPrepareSource(
+            GameObject source,
+            out GameObject result,
+            out string error)
+        {
+            result = null;
             error = null;
-            GameObject temporaryParent = new GameObject("UniversalGrasp_VisualClone");
+            PreparedSourceScope scope = currentScope;
+            if (scope == null || scope.IsReleased)
+            {
+                error = "No active AttachItem prepared-source scope.";
+                return false;
+            }
+
+            GameObject temporaryParent = new GameObject("UniversalGrasp_VisualSource");
             temporaryParent.SetActive(false);
 
             try
             {
-                // Instantiate(source, temporaryParent) keeps the source's world position
-                // by default. Capture the prefab-local transform explicitly; otherwise
-                // detaching the clone later can turn a prefab position into a large hand
-                // offset (for example y=-50 on potion visuals).
                 Vector3 sourceLocalScale = source.transform.localScale;
 
-                ZNetView.m_forceDisableInit = true;
-                try
-                {
-                    clone = Object.Instantiate(source, temporaryParent.transform);
-                }
-                finally
-                {
-                    ZNetView.m_forceDisableInit = false;
-                }
+                result = InstantiateWithoutZNetViewInitialization(
+                    source,
+                    temporaryParent.transform);
 
-                if (!RemoveComponentsRecursively(clone.transform, out error))
+                if (!RemoveComponentsRecursively(result.transform, out error))
                 {
-                    clone = null;
+                    result = null;
                     return false;
                 }
 
-                // AttachItem expects a newly created visual to be aligned with the
-                // target joint. Some Valheim attach prefabs carry authoring/world
-                // offsets (the Mead prefab, for example, has a local Y of about -50),
-                // which must not become a hand offset. Keep only the authored scale;
-                // the vanilla method applies the joint position and rotation.
-                clone.transform.localPosition = Vector3.zero;
-                clone.transform.localRotation = Quaternion.identity;
-                clone.transform.localScale = sourceLocalScale;
-                clone.transform.SetParent(null, false);
+                // This object becomes local 1 in AttachItem. Preserve the original
+                // name because vanilla uses it to detect attach_skin semantics.
+                result.name = source.name;
+                result.transform.localPosition = Vector3.zero;
+                result.transform.localRotation = Quaternion.identity;
+                result.transform.localScale = sourceLocalScale;
+                result.SetActive(false);
+                result.transform.SetParent(null, false);
+                scope.SetPreparedSource(result);
                 return true;
             }
             catch (Exception exception)
             {
                 error = exception.Message;
-                clone = null;
+                result = null;
                 return false;
             }
             finally
             {
                 Object.DestroyImmediate(temporaryParent);
+            }
+        }
+
+        private static GameObject InstantiateWithoutZNetViewInitialization(
+            GameObject source,
+            Transform parent)
+        {
+            bool previousForceDisableInit = ZNetView.m_forceDisableInit;
+            ZNetView.m_forceDisableInit = true;
+            try
+            {
+                return Object.Instantiate(source, parent);
+            }
+            finally
+            {
+                ZNetView.m_forceDisableInit = previousForceDisableInit;
+            }
+        }
+
+        internal sealed class PreparedSourceScope
+        {
+            private GameObject preparedSource;
+
+            internal PreparedSourceScope(PreparedSourceScope parent)
+            {
+                Parent = parent;
+            }
+
+            internal PreparedSourceScope Parent { get; }
+            internal bool IsReleased { get; private set; }
+
+            internal void SetPreparedSource(GameObject source)
+            {
+                if (IsReleased)
+                {
+                    throw new InvalidOperationException("Cannot prepare a source in a released scope.");
+                }
+
+                if (preparedSource != null)
+                {
+                    Object.DestroyImmediate(preparedSource);
+                }
+
+                preparedSource = source;
+            }
+
+            internal void Release()
+            {
+                if (IsReleased)
+                {
+                    return;
+                }
+
+                IsReleased = true;
+                if (preparedSource != null)
+                {
+                    Object.DestroyImmediate(preparedSource);
+                    preparedSource = null;
+                }
             }
         }
 

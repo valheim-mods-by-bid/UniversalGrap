@@ -20,160 +20,236 @@ namespace UniversalGrasp.Patches
             typeof(VisEquipmentAttachItemPatch),
             nameof(ChooseAttachSource));
 
-        private static readonly MethodInfo InstantiateVisualMethod = AccessTools.Method(
-            typeof(VisEquipmentAttachItemPatch),
-            nameof(InstantiateVisual));
-
         [HarmonyTranspiler]
+        // Run early so the semantic matcher normally sees vanilla-like IL. The
+        // injection is deliberately small and leaves Object.Instantiate untouched.
+        [HarmonyPriority(Priority.First)]
         private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
         {
             var code = new List<CodeInstruction>(instructions);
             int selectionIndex = FindAttachSelectionNullCheck(code);
-
             if (selectionIndex < 0)
             {
-                Debug.LogWarning("[UniversalGrasp] VisEquipment.AttachItem changed; leaving the original method unmodified.");
+#if DEBUG
+                Debug.LogWarning(
+                    "[UniversalGrasp] VisEquipment.AttachItem no longer has the expected selection null-check; "
+                    + "leaving the original method unmodified.");
+#endif
                 return code;
             }
 
-            int instantiateIndex = selectionIndex + 7;
-            if (!IsGameObjectInstantiate(code[instantiateIndex]))
+#if DEBUG
+            // This is a confidence check only. Another mod may legitimately replace
+            // the Instantiate call while leaving the selection hook usable.
+            if (!HasUniqueAttachInstantiationFromSelectedSource(code, selectionIndex))
             {
-                Debug.LogWarning("[UniversalGrasp] VisEquipment.AttachItem instantiate call changed; leaving the original method unmodified.");
-                return code;
+                Debug.LogWarning(
+                    "[UniversalGrasp] VisEquipment.AttachItem instantiation differs from vanilla; "
+                    + "applying the independent selection hook anyway.");
+            }
+#endif
+
+            InjectAttachSelection(code, selectionIndex);
+            return code;
+        }
+
+        [HarmonyPostfix]
+        private static void CorrectInvalidHandOffset(
+            GameObject __result,
+            Transform joint,
+            VisualCloneCleaner.PreparedSourceScope __state)
+        {
+            try
+            {
+                if (__result != null
+                    && joint != null
+                    && IsHandJoint(joint)
+                    && __result.transform.localPosition.sqrMagnitude > 100f)
+                {
+                    __result.transform.localPosition = Vector3.zero;
+                }
+            }
+            finally
+            {
+                VisualCloneCleaner.ReleaseScope(__state);
+            }
+        }
+
+        [HarmonyPrefix]
+        private static void BeginPreparedSourceScope(
+            out VisualCloneCleaner.PreparedSourceScope __state)
+        {
+            __state = VisualCloneCleaner.BeginScope();
+        }
+
+        [HarmonyFinalizer]
+        private static Exception RestoreInstantiationState(
+            Exception __exception,
+            VisualCloneCleaner.PreparedSourceScope __state)
+        {
+            VisualCloneCleaner.ReleaseScope(__state);
+            return __exception;
+        }
+
+        private static int FindAttachSelectionNullCheck(IReadOnlyList<CodeInstruction> code)
+        {
+            int match = -1;
+            for (int index = 0; index < code.Count; index++)
+            {
+                if (!IsLoadLocal(code[index], 1))
+                {
+                    continue;
+                }
+
+                int loadNullIndex = NextMeaningfulInstruction(code, index + 1);
+                int equalityIndex = NextMeaningfulInstruction(code, loadNullIndex + 1);
+                int branchIndex = NextMeaningfulInstruction(code, equalityIndex + 1);
+                int nullResultIndex = NextMeaningfulInstruction(code, branchIndex + 1);
+                int returnIndex = NextMeaningfulInstruction(code, nullResultIndex + 1);
+
+                if (loadNullIndex < 0
+                    || equalityIndex < 0
+                    || branchIndex < 0
+                    || nullResultIndex < 0
+                    || returnIndex < 0
+                    || code[loadNullIndex].opcode != OpCodes.Ldnull
+                    || !code[equalityIndex].Calls(ObjectEqualityMethod)
+                    || code[branchIndex].opcode.FlowControl != FlowControl.Cond_Branch
+                    || code[nullResultIndex].opcode != OpCodes.Ldnull
+                    || code[returnIndex].opcode != OpCodes.Ret)
+                {
+                    continue;
+                }
+
+                if (match >= 0)
+                {
+                    return -1;
+                }
+
+                match = index;
             }
 
-            // The original stack already contains the selected source.
-            // Add the item prefab, joint and back-attach flag and replace Object.Instantiate(source)
-            // with the new visual instantiation helper.
-            var loadItemPrefab = new CodeInstruction(OpCodes.Ldloc_0);
-            MoveLabelsAndBlocks(code[instantiateIndex], loadItemPrefab);
-            code[instantiateIndex].opcode = OpCodes.Call;
-            code[instantiateIndex].operand = InstantiateVisualMethod;
-            code.Insert(instantiateIndex, loadItemPrefab);
-            code.Insert(instantiateIndex + 1, new CodeInstruction(OpCodes.Ldarg_3));
-            code.Insert(instantiateIndex + 2, new CodeInstruction(OpCodes.Ldarg_S, (byte)5));
+            return match;
+        }
 
-            // Replace an unsuitable vanilla attach source before the original method performs its null check.
-            var chooseStart = new CodeInstruction(OpCodes.Ldloc_0);
-            MoveLabelsAndBlocks(code[selectionIndex], chooseStart);
+#if DEBUG
+        private static bool HasUniqueAttachInstantiationFromSelectedSource(
+            IReadOnlyList<CodeInstruction> code,
+            int searchAfterIndex)
+        {
+            int matches = 0;
+
+            for (int index = searchAfterIndex + 1; index < code.Count; index++)
+            {
+                if (!IsGameObjectInstantiate(code[index]))
+                {
+                    continue;
+                }
+
+                int candidateSourceIndex = PreviousMeaningfulInstruction(code, index - 1);
+                int resultStoreIndex = NextMeaningfulInstruction(code, index + 1);
+                if (candidateSourceIndex < 0
+                    || resultStoreIndex < 0
+                    || !IsLoadLocal(code[candidateSourceIndex], 1)
+                    || !IsStoreLocal(code[resultStoreIndex]))
+                {
+                    continue;
+                }
+
+                matches++;
+                if (matches > 1)
+                {
+                    return false;
+                }
+            }
+
+            return matches == 1;
+        }
+#endif
+
+        private static void InjectAttachSelection(List<CodeInstruction> code, int selectionIndex)
+        {
+            var firstInjectedInstruction = new CodeInstruction(OpCodes.Ldloc_0);
+            MoveLabelsAndBlocks(code[selectionIndex], firstInjectedInstruction);
             code.InsertRange(selectionIndex, new[]
             {
-                chooseStart,
+                firstInjectedInstruction,
                 new CodeInstruction(OpCodes.Ldloc_1),
                 new CodeInstruction(OpCodes.Ldarg_3),
                 new CodeInstruction(OpCodes.Ldarg_S, (byte)5),
                 new CodeInstruction(OpCodes.Call, ChooseAttachSourceMethod),
                 new CodeInstruction(OpCodes.Stloc_1)
             });
-
-            int finalReturnIndex = code.FindLastIndex(instruction => instruction.opcode == OpCodes.Ret);
-            if (finalReturnIndex >= 0)
-            {
-                code.InsertRange(finalReturnIndex, new[]
-                {
-                    new CodeInstruction(OpCodes.Dup),
-                    new CodeInstruction(OpCodes.Call, AccessTools.Method(
-                        typeof(VisEquipmentAttachItemPatch), nameof(LogAttachResult)))
-                });
-            }
-
-            UniversalGraspPlugin.Log?.LogDebug(
-                "VisEquipment.AttachItem transpiler applied successfully (attach selection and visual instantiation hooks active).");
-
-            return code;
         }
 
-        [HarmonyPostfix]
-        private static void Postfix(GameObject __result, int itemHash, Transform joint)
+        private static int NextMeaningfulInstruction(
+            IReadOnlyList<CodeInstruction> code,
+            int startIndex)
         {
-            if (UniversalGraspPlugin.Log == null)
+            for (int index = Math.Max(0, startIndex); index < code.Count; index++)
             {
-                return;
-            }
-
-            string prefabName = ObjectDB.instance.GetItemPrefab(itemHash)?.name ?? "<null>";
-            if (__result == null)
-            {
-                UniversalGraspPlugin.Log.LogDebug(
-                    $"Attach result: prefab={prefabName}, joint={joint?.name ?? "<null>"}, result=<null>, valid=False.");
-                return;
-            }
-
-            Renderer[] renderers = __result.GetComponentsInChildren<Renderer>(true);
-            // A few consumable prefabs carry authoring offsets that are valid in their
-            // world/pickup context but not when attached to a hand (Mead currently has
-            // a Y offset close to -50). Do not disturb normal equip offsets; only repair
-            // values that are clearly outside a plausible hand-local range.
-            if (joint != null && IsHandJoint(joint) && __result.transform.localPosition.sqrMagnitude > 100f)
-            {
-                Vector3 invalidPosition = __result.transform.localPosition;
-                __result.transform.localPosition = Vector3.zero;
-                UniversalGraspPlugin.Log.LogDebug(
-                    $"Corrected invalid hand visual offset: prefab={prefabName}, "
-                    + $"joint={joint.name}, previousPosition={invalidPosition}, newPosition={Vector3.zero}.");
-            }
-
-            string rendererDetails = string.Join(", ", Array.ConvertAll(
-                renderers,
-                renderer => DescribeRenderer(renderer)));
-            UniversalGraspPlugin.Log.LogDebug(
-                $"Attach result: prefab={prefabName}, joint={joint?.name ?? "<null>"}, "
-                + $"result={__result.name}, valid=True, parent={__result.transform.parent?.name ?? "<null>"}, "
-                + $"localPosition={__result.transform.localPosition}, localScale={__result.transform.localScale}, "
-                + $"renderers={renderers.Length}, details=[{rendererDetails}].");
-        }
-
-        private static void LogAttachResult(GameObject result)
-        {
-            if (UniversalGraspPlugin.Log == null)
-            {
-                return;
-            }
-
-            if (result == null)
-            {
-                UniversalGraspPlugin.Log.LogDebug("Attach result (injected): result=<null>, valid=False.");
-                return;
-            }
-
-            Renderer[] renderers = result.GetComponentsInChildren<Renderer>(true);
-            UniversalGraspPlugin.Log.LogDebug(
-                $"Attach result (injected): result={result.name}, valid=True, "
-                + $"parent={result.transform.parent?.name ?? "<null>"}, "
-                + $"localPosition={result.transform.localPosition}, localScale={result.transform.localScale}, "
-                + $"renderers={renderers.Length}.");
-        }
-
-        private static string DescribeRenderer(Renderer renderer)
-        {
-            MeshFilter meshFilter = renderer.GetComponent<MeshFilter>();
-            Mesh mesh = meshFilter != null ? meshFilter.sharedMesh : null;
-            Material material = renderer.sharedMaterial;
-            return $"{renderer.GetType().Name}@{renderer.gameObject.name}"
-                + $"(active={renderer.gameObject.activeInHierarchy},enabled={renderer.enabled}"
-                + $",mesh={mesh?.name ?? "<null>"},material={material?.name ?? "<null>"}"
-                + $",bounds={renderer.bounds})";
-        }
-
-        private static int FindAttachSelectionNullCheck(IReadOnlyList<CodeInstruction> code)
-        {
-            for (int index = 0; index <= code.Count - 8; index++)
-            {
-                if (code[index].opcode == OpCodes.Ldloc_1
-                    && code[index + 1].opcode == OpCodes.Ldnull
-                    && code[index + 2].Calls(ObjectEqualityMethod)
-                    && code[index + 3].opcode.FlowControl == FlowControl.Cond_Branch
-                    && code[index + 4].opcode == OpCodes.Ldnull
-                    && code[index + 5].opcode == OpCodes.Ret
-                    && code[index + 6].opcode == OpCodes.Ldloc_1
-                    && IsGameObjectInstantiate(code[index + 7]))
+                if (code[index].opcode != OpCodes.Nop)
                 {
                     return index;
                 }
             }
 
             return -1;
+        }
+
+#if DEBUG
+        private static int PreviousMeaningfulInstruction(
+            IReadOnlyList<CodeInstruction> code,
+            int startIndex)
+        {
+            for (int index = Math.Min(startIndex, code.Count - 1); index >= 0; index--)
+            {
+                if (code[index].opcode != OpCodes.Nop)
+                {
+                    return index;
+                }
+            }
+
+            return -1;
+        }
+#endif
+
+        private static bool IsLoadLocal(CodeInstruction instruction, int localIndex)
+        {
+            if (localIndex == 0 && instruction.opcode == OpCodes.Ldloc_0) return true;
+            if (localIndex == 1 && instruction.opcode == OpCodes.Ldloc_1) return true;
+            if (localIndex == 2 && instruction.opcode == OpCodes.Ldloc_2) return true;
+            if (localIndex == 3 && instruction.opcode == OpCodes.Ldloc_3) return true;
+
+            if (instruction.opcode != OpCodes.Ldloc
+                && instruction.opcode != OpCodes.Ldloc_S)
+            {
+                return false;
+            }
+
+            if (instruction.operand is LocalBuilder localBuilder)
+            {
+                return localBuilder.LocalIndex == localIndex;
+            }
+
+            if (instruction.operand is LocalVariableInfo localVariable)
+            {
+                return localVariable.LocalIndex == localIndex;
+            }
+
+            return instruction.operand is int integerIndex && integerIndex == localIndex
+                || instruction.operand is byte byteIndex && byteIndex == localIndex;
+        }
+
+#if DEBUG
+        private static bool IsStoreLocal(CodeInstruction instruction)
+        {
+            return instruction.opcode == OpCodes.Stloc
+                || instruction.opcode == OpCodes.Stloc_S
+                || instruction.opcode == OpCodes.Stloc_0
+                || instruction.opcode == OpCodes.Stloc_1
+                || instruction.opcode == OpCodes.Stloc_2
+                || instruction.opcode == OpCodes.Stloc_3;
         }
 
         private static bool IsGameObjectInstantiate(CodeInstruction instruction)
@@ -189,6 +265,7 @@ namespace UniversalGrasp.Patches
             Type[] genericArguments = method.GetGenericArguments();
             return genericArguments.Length == 1 && genericArguments[0] == typeof(GameObject);
         }
+#endif
 
         private static void MoveLabelsAndBlocks(CodeInstruction source, CodeInstruction destination)
         {
@@ -210,79 +287,34 @@ namespace UniversalGrasp.Patches
                 || itemPrefab.name == "Lantern"
                 || !IsHandJoint(joint))
             {
-                return LogAttachSelection(itemPrefab, vanillaSource, joint, vanillaSource);
+                return vanillaSource;
             }
 
-            ItemDrop itemDrop = itemPrefab.GetComponent<ItemDrop>();
-            bool isWeapon = itemDrop != null
-                && itemDrop.m_itemData != null
-                && itemDrop.m_itemData.IsWeapon();
-
-            if (isWeapon && vanillaSource != null)
+            if (IsWeapon(itemPrefab) && vanillaSource != null)
             {
-                return LogAttachSelection(itemPrefab, vanillaSource, joint, vanillaSource);
+                return vanillaSource;
             }
 
-            GameObject selectedSource = UniversalGraspPlugin.GetAttachObject(itemPrefab) ?? vanillaSource;
-            return LogAttachSelection(itemPrefab, vanillaSource, joint, selectedSource);
-        }
+            GameObject selectedSource = AttachSourceSelector.Find(itemPrefab) ?? vanillaSource;
+            if (selectedSource == null)
+            {
+                return null;
+            }
 
-        private static GameObject LogAttachSelection(
-            GameObject itemPrefab,
-            GameObject vanillaSource,
-            Transform joint,
-            GameObject selectedSource)
-        {
-            UniversalGraspPlugin.Log?.LogDebug(
-                $"Attach selection: prefab={itemPrefab?.name ?? "<null>"}, joint={joint?.name ?? "<null>"}, "
-                + $"vanillaAttach={vanillaSource?.name ?? "<null>"}, selectedAttach={selectedSource?.name ?? "<null>"}, "
-                + $"valid={selectedSource != null}.");
+            if (VisualCloneCleaner.TryPrepareSource(
+                selectedSource,
+                out GameObject preparedSource,
+                out string error))
+            {
+                return preparedSource;
+            }
+
+#if DEBUG
+            Debug.LogWarning(
+                $"[UniversalGrasp] Could not prepare a safe visual source for "
+                + $"{itemPrefab.name}: {error}");
+#endif
             return selectedSource;
-        }
-
-        private static bool IsHandJoint(Transform joint)
-        {
-            return joint.name == "LeftHand_Attach" || joint.name == "RightHand_Attach";
-        }
-
-        private static GameObject InstantiateVisual(
-            GameObject source,
-            GameObject itemPrefab,
-            Transform joint,
-            bool backAttach)
-        {
-            bool isNonWeaponHandItem = !backAttach
-                && IsHandJoint(joint)
-                && !IsWeapon(itemPrefab);
-            bool useVanillaInstantiation = !isNonWeaponHandItem
-                && (IsVanillaAttachSource(source) || itemPrefab.name == "Lantern");
-            UniversalGraspPlugin.Log?.LogDebug(
-                $"Visual instantiation: prefab={itemPrefab.name}, source={source?.name ?? "<null>"}, "
-                + $"joint={joint?.name ?? "<null>"}, validSource={source != null}, cleaner={!useVanillaInstantiation}.");
-
-            if (useVanillaInstantiation)
-            {
-                GameObject vanillaClone = Object.Instantiate(source);
-                UniversalGraspPlugin.Log?.LogDebug(
-                    $"Visual instantiation result: prefab={itemPrefab.name}, clone={vanillaClone?.name ?? "<null>"}, valid={vanillaClone != null}.");
-                return vanillaClone;
-            }
-
-            if (VisualCloneCleaner.TryCreate(source, out GameObject clone, out string error))
-            {
-                Renderer[] renderers = clone.GetComponentsInChildren<Renderer>(true);
-                string rendererSummary = string.Join(", ", Array.ConvertAll(
-                    renderers,
-                    renderer => DescribeRenderer(renderer)));
-                UniversalGraspPlugin.Log?.LogDebug(
-                    $"Clean visual clone created: prefab={itemPrefab.name}, source={source.name}, clone={clone?.name ?? "<null>"}, valid={clone != null}.");
-                UniversalGraspPlugin.Log?.LogDebug(
-                    $"Clean visual clone renderers: prefab={itemPrefab.name}, count={renderers.Length}, [{rendererSummary}].");
-                return clone;
-            }
-
-            Debug.LogWarning($"[UniversalGrasp] Could not create a safe visual clone of {itemPrefab.name}: {error}");
-            return Object.Instantiate(source);
         }
 
         private static bool IsWeapon(GameObject itemPrefab)
@@ -293,11 +325,10 @@ namespace UniversalGrasp.Patches
                 && itemDrop.m_itemData.IsWeapon();
         }
 
-        private static bool IsVanillaAttachSource(GameObject source)
+        private static bool IsHandJoint(Transform joint)
         {
-            return source.name == "attach"
-                || source.name == "attach_skin"
-                || source.name == "attach_back";
+            return joint.name == "LeftHand_Attach" || joint.name == "RightHand_Attach";
         }
+
     }
 }

@@ -64,6 +64,9 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="AttachSourceSelector.cs" />
+    <Compile Include="HandItemController.cs" />
+    <Compile Include="Patches\HumanoidDropItemPatch.cs" />
     <Compile Include="Patches\InventoryGuiPatches.cs" />
     <Compile Include="Properties\PluginAssemblyInfo.cs" />
     <Compile Include="UniversalGrasp.cs" />
